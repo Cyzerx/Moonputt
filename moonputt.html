@@ -1,0 +1,1105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Moonputt</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..800&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+  /* Layout: one-screen instrument panel. A slim strip of readouts sits above a star-chart playfield that takes the rest. */
+  :root {
+    --sky: #0c1534;
+    --sky-deep: #060b1f;
+    --ink: #142049;
+    --chart: #8395cc;
+    --chalk: #e9edf9;
+    --saffron: #ffcc4d;
+    --flag: #ff7b6e;
+    --mint: #7fdcbf;
+    --ember: #ff9a52;
+    --line: rgba(131, 149, 204, 0.26);
+    --scrim: rgba(6, 11, 31, 0.72);
+    --font-display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    color-scheme: dark;
+  }
+  html { height: 100%; box-sizing: border-box; background: var(--sky-deep); }
+  body { height: 100%; background: var(--sky-deep); color: var(--chalk); font-family: var(--font-display); overflow: hidden; }
+
+  .app {
+    height: 100%; box-sizing: border-box;
+    display: flex; flex-direction: column; gap: 10px;
+    padding-block: 12px 14px;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+  }
+
+  .hud { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 26px; }
+  .brand { display: flex; align-items: baseline; gap: 12px; }
+  .logo {
+    font-weight: 800; font-size: 27px; letter-spacing: -0.035em; line-height: 1;
+    font-variation-settings: "opsz" 96;
+  }
+  .logo .dot {
+    display: inline-block; width: 0.36em; height: 0.36em; margin-right: 0.12em; border-radius: 50%;
+    background: radial-gradient(circle at 35% 35%, #fff6d8, var(--saffron) 55%, #c98f12);
+    box-shadow: 0 0 12px rgba(255, 204, 77, 0.55);
+    vertical-align: 0.06em;
+  }
+  .course { font: 500 11px/1 var(--font-mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--chart); }
+
+  .stats { display: flex; flex-wrap: wrap; gap: 6px 24px; margin: 0; flex: 1; }
+  .stats > div { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+  .stats dt { font: 500 10px/1 var(--font-mono); letter-spacing: 0.16em; text-transform: uppercase; color: var(--chart); }
+  .stats dd { margin: 0; font: 600 19px/1 var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .stats dd small { font-size: 12px; font-weight: 400; color: var(--chart); }
+
+  .actions { display: flex; gap: 8px; }
+  button {
+    font: 650 13px/1 var(--font-display); color: var(--chalk);
+    background: var(--ink); border: 1px solid var(--line); border-radius: 999px;
+    padding: 10px 15px; cursor: pointer; white-space: nowrap;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  button:hover { border-color: var(--chart); }
+  button.primary { background: var(--saffron); color: var(--sky-deep); border-color: var(--saffron); }
+  button.primary:hover { background: #ffd970; }
+  button:focus-visible, canvas:focus-visible { outline: 2px solid var(--saffron); outline-offset: 2px; }
+
+  .stage {
+    position: relative; flex: 1; min-height: 0;
+    border-radius: 16px; overflow: hidden;
+    border: 1px solid var(--line); background: var(--sky);
+  }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: crosshair; }
+  canvas:focus-visible { outline-offset: -3px; }
+
+  .hint {
+    position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%);
+    margin: 0; width: max-content; max-width: calc(100% - 32px); box-sizing: border-box; text-align: center;
+    font: 12px/1.45 var(--font-mono); color: var(--chalk);
+    background: rgba(6, 11, 31, 0.6); border: 1px solid var(--line);
+    padding: 7px 14px; border-radius: 14px; pointer-events: none;
+    transition: opacity 0.8s;
+  }
+  .hint .keys { color: var(--chart); }
+  .hint.gone { opacity: 0; }
+  @media (pointer: coarse) { .hint .keys { display: none; } }
+
+  .toast {
+    position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
+    max-width: calc(100% - 32px); box-sizing: border-box;
+    font: 700 15px/1.3 var(--font-display); text-align: center;
+    padding: 8px 16px; border-radius: 999px;
+    background: var(--ink); border: 1px solid var(--line); pointer-events: none;
+  }
+  .toast.bad { color: var(--flag); }
+  .toast.good { color: var(--mint); }
+
+  .card {
+    position: absolute; inset: 0; display: grid; place-items: center;
+    background: var(--scrim); padding: 16px; overflow-y: auto;
+    -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px);
+  }
+  .card-inner {
+    width: min(620px, 100%); box-sizing: border-box;
+    background: var(--ink); border: 1px solid var(--line); border-radius: 20px;
+    padding: 24px; display: flex; flex-direction: column; gap: 14px;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+  }
+  .eyebrow { margin: 0; font: 500 11px/1 var(--font-mono); letter-spacing: 0.16em; text-transform: uppercase; color: var(--chart); }
+  .card h2 {
+    margin: 0; font-size: clamp(36px, 7vw, 60px); font-weight: 800; line-height: 0.95;
+    letter-spacing: -0.04em; font-variation-settings: "opsz" 96; text-wrap: balance;
+  }
+  .card h2.good { color: var(--mint); }
+  .card h2.bad { color: var(--flag); }
+  .card h2.ace { color: var(--saffron); }
+  .card p { margin: 0; font-size: 15px; line-height: 1.5; max-width: 60ch; }
+  .card .row { display: flex; flex-wrap: wrap; gap: 10px; padding-top: 4px; }
+
+  .sc-wrap { overflow-x: auto; border-radius: 10px; border: 1px solid var(--line); }
+  table.sc { border-collapse: collapse; width: 100%; min-width: 460px; font: 500 13px/1 var(--font-mono); font-variant-numeric: tabular-nums; }
+  .sc th, .sc td { padding: 7px 4px; text-align: center; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+  .sc tr > :last-child { border-right: 0; }
+  .sc tbody tr:last-child > * { border-bottom: 0; }
+  .sc th { font-weight: 500; font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--chart); padding-inline: 10px; }
+  .sc th[scope="row"] { text-align: left; }
+  .sc .now { background: rgba(255, 204, 77, 0.09); }
+  .mk { display: inline-grid; place-items: center; width: 24px; height: 24px; box-sizing: border-box; }
+  .mk.birdie { border: 1.5px solid var(--mint); border-radius: 50%; }
+  .mk.eagle { border: 1.5px solid var(--mint); border-radius: 50%; box-shadow: 0 0 0 2px var(--ink), 0 0 0 3.5px var(--mint); }
+  .mk.bogey { border: 1.5px solid var(--flag); }
+  .mk.dbl { border: 1.5px solid var(--flag); box-shadow: 0 0 0 2px var(--ink), 0 0 0 3.5px var(--flag); }
+  .legend { margin: 0; font: 11px/1.4 var(--font-mono); color: var(--chart); }
+
+  @media (max-width: 620px) {
+    .hud { gap: 10px 12px; }
+    .brand { flex-direction: column; align-items: flex-start; gap: 5px; }
+    .logo { font-size: 23px; }
+    .stats { order: 3; flex-basis: 100%; gap: 6px 18px; }
+    .stats dd { font-size: 16px; }
+    .actions { margin-left: auto; gap: 6px; }
+    button { padding: 9px 11px; font-size: 12px; }
+    .card-inner { padding: 18px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .hint, button { transition: none; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="hud">
+    <div class="brand">
+      <span class="logo"><span class="dot" aria-hidden="true"></span>Moonputt</span>
+      <span class="course" id="courseLabel">Course</span>
+    </div>
+    <dl class="stats">
+      <div><dt>Hole</dt><dd id="sHole">1</dd></div>
+      <div><dt>Par</dt><dd id="sPar">3</dd></div>
+      <div><dt>Strokes</dt><dd id="sStrokes">0</dd></div>
+      <div><dt>Round</dt><dd id="sTotal">E</dd></div>
+      <div><dt>To pin</dt><dd id="sPin">–</dd></div>
+    </dl>
+    <div class="actions">
+      <button type="button" id="btnSound" aria-pressed="true">Sound on</button>
+      <button type="button" id="btnNew">New course</button>
+    </div>
+  </header>
+  <main class="stage" id="stage">
+    <canvas id="cv" tabindex="0" aria-label="Moonputt playfield. Drag anywhere and let go to putt. With a keyboard, arrows aim and set power, Space putts."></canvas>
+    <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+    <p class="hint" id="hint">Drag back from anywhere and let go to putt. Planets bend the shot.<span class="keys"> Arrows aim, Space putts.</span></p>
+    <div class="card" id="card" hidden></div>
+  </main>
+</div>
+
+<script>
+var MP = (function () {
+  const W = 1600, H = 1000, HOLES = 9, BALL_R = 9, HOLE_R = 20, CAPTURE_V = 560,
+    MAX_V = 1150, DT = 1 / 240, OOB = 180, MAX_STROKES = 10, MAX_FLIGHT = 15, SOFT = 300;
+
+  const PLANET_COLORS = ['#79d6bb', '#f2a65a', '#b7a3e6', '#6cb4ee', '#e98fb5', '#c9d672'];
+  const NAMES = ['Mulligan', 'Divot', 'Gimme', 'Dogleg', 'Niblick', 'Mashie', 'Bogey Prime', 'Fore',
+    'Caddy', 'Back Nine', 'Sand Wedge', 'Long Iron', 'Fairway', 'Spoon', 'Brassie', 'Approach',
+    'Chip', 'Hook', 'Slice', 'Yips', 'Clubhouse', 'Nineteenth'];
+  const BH_NAMES = ['The Rough', 'Big Bogey', 'The Shank'];
+
+  function mulberry32(a) {
+    return function () {
+      a |= 0; a = (a + 0x6D2B79F5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  function hash2(a, b) {
+    let h = Math.imul(a ^ 0x9E3779B9, 0x85EBCA6B) ^ Math.imul((b + 0x632BE5AB) | 0, 0xC2B2AE35);
+    h ^= h >>> 15; h = Math.imul(h, 0x27D4EB2D); h ^= h >>> 13;
+    return h >>> 0;
+  }
+  const dist = (ax, ay, bx, by) => Math.hypot(ax - bx, ay - by);
+
+  // One physics tick. Gravity from every body, then planet contacts. Returns impact speed.
+  function step(b, L, dt) {
+    let ax = 0, ay = 0;
+    const bodies = L.bodies;
+    for (let i = 0; i < bodies.length; i++) {
+      const p = bodies[i];
+      const dx = p.x - b.x, dy = p.y - b.y;
+      const d2 = dx * dx + dy * dy + SOFT;
+      const f = p.gm / (d2 * Math.sqrt(d2));
+      ax += dx * f; ay += dy * f;
+    }
+    b.vx += ax * dt; b.vy += ay * dt;
+    b.x += b.vx * dt; b.y += b.vy * dt;
+    let impact = 0;
+    b.contact = false;
+    const ps = L.planets;
+    for (let i = 0; i < ps.length; i++) {
+      const p = ps[i];
+      const dx = b.x - p.x, dy = b.y - p.y, min = p.r + BALL_R, d2 = dx * dx + dy * dy;
+      if (d2 >= min * min) continue;
+      const d = Math.sqrt(d2) || 1, nx = dx / d, ny = dy / d;
+      b.x = p.x + nx * min; b.y = p.y + ny * min;
+      const vn = b.vx * nx + b.vy * ny;
+      if (vn < 0) {
+        const tx = -ny, ty = nx;
+        let vt = b.vx * tx + b.vy * ty;
+        const bouncing = vn < -70;
+        if (bouncing) vt *= 0.86;
+        else {
+          vt *= 1 - 2.2 * dt;
+          const dec = 70 * dt;
+          vt = Math.abs(vt) <= dec ? 0 : vt - Math.sign(vt) * dec;
+        }
+        const nvn = bouncing ? -vn * 0.52 : 0;
+        b.vx = nx * nvn + tx * vt; b.vy = ny * nvn + ty * vt;
+        if (-vn > impact) impact = -vn;
+      }
+      b.contact = true;
+    }
+    return impact;
+  }
+
+  // Decide whether the shot is over. st carries per-shot memory (rest timer, lip-out flag).
+  function judge(b, L, t, st, dt) {
+    const sp = Math.hypot(b.vx, b.vy);
+    const hx = b.x - L.hole.x, hy = b.y - L.hole.y;
+    if (hx * hx + hy * hy < HOLE_R * HOLE_R) {
+      if (sp < CAPTURE_V) return 'sunk';
+      st.lip = true;
+    }
+    for (let i = 0; i < L.blackholes.length; i++) {
+      const k = L.blackholes[i];
+      const dx = b.x - k.x, dy = b.y - k.y;
+      if (dx * dx + dy * dy < k.r * k.r) { st.bh = k; return 'swallowed'; }
+    }
+    if (b.x < -OOB || b.x > W + OOB || b.y < -OOB || b.y > H + OOB) return 'lost';
+    if (sp < (b.contact ? 16 : 5)) {
+      st.rest += dt;
+      if (st.rest > (b.contact ? 0.3 : 1.2)) return 'rest';
+    } else st.rest = 0;
+    if (t > MAX_FLIGHT) return 'orbit';
+    return null;
+  }
+
+  function shuffle(a, rng) {
+    for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+    return a;
+  }
+
+  function layout(rng, idx) {
+    const R = (a, b) => a + (b - a) * rng();
+    const pick = a => a[Math.floor(rng() * a.length)];
+    const tee = { x: R(140, 230), y: R(200, 800) };
+    const hole = { x: R(1360, 1470), y: R(160, 840) };
+    const nPlan = [1, 2, 2, 3, 3, 4, 4, 5, 5][idx] + (idx > 1 && rng() < 0.4 ? 1 : 0);
+    const nBH = idx < 4 ? 0 : idx < 7 ? 1 : 2;
+    const names = shuffle(NAMES.slice(), rng);
+    const colors = shuffle(PLANET_COLORS.slice(), rng);
+    const planets = [];
+    let tries = 0;
+    while (planets.length < nPlan && tries++ < 500) {
+      const first = planets.length === 0;
+      const r = first ? R(80, 125) : R(42, 105);
+      let x, y;
+      if (first) {
+        const t = R(0.38, 0.62), off = R(-50, 50);
+        const dx = hole.x - tee.x, dy = hole.y - tee.y, len = Math.hypot(dx, dy);
+        x = tee.x + dx * t - (dy / len) * off; y = tee.y + dy * t + (dx / len) * off;
+      } else { x = R(330, 1280); y = R(r + 30, H - r - 30); }
+      if (y < r + 20 || y > H - r - 20) continue;
+      if (dist(x, y, tee.x, tee.y) < r + 120) continue;
+      if (dist(x, y, hole.x, hole.y) < r + 100) continue;
+      if (planets.some(p => dist(x, y, p.x, p.y) < p.r + r + 70)) continue;
+      const g = R(800, 1400);
+      const style = pick(['bands', 'craters', 'bands', 'plain']);
+      const bands = [], craters = [];
+      const nb = 3 + Math.floor(rng() * 3);
+      for (let i = 0; i < nb; i++) bands.push({ off: R(-0.95, 0.8), w: R(0.06, 0.22), a: R(0.08, 0.22) });
+      const nc = 3 + Math.floor(rng() * 4);
+      for (let i = 0; i < nc; i++) {
+        const cr = R(0.08, 0.2), ca = R(0, Math.PI * 2), cd = R(0, 0.8 - cr);
+        craters.push({ dx: Math.cos(ca) * cd, dy: Math.sin(ca) * cd, r: cr });
+      }
+      planets.push({
+        x, y, r, g, gm: g * r * r, color: colors[planets.length % colors.length],
+        name: names[planets.length], style, bands, craters, tilt: R(-0.6, 0.6),
+      });
+    }
+    if (planets.length < nPlan) return null;
+    const blackholes = [];
+    tries = 0;
+    while (blackholes.length < nBH && tries++ < 500) {
+      const x = R(420, 1250), y = R(120, H - 120);
+      if (dist(x, y, tee.x, tee.y) < 260 || dist(x, y, hole.x, hole.y) < 170) continue;
+      if (planets.some(p => dist(x, y, p.x, p.y) < p.r + 110)) continue;
+      if (blackholes.some(k => dist(x, y, k.x, k.y) < 300)) continue;
+      blackholes.push({ x, y, r: 14, gm: 4.2e6, name: BH_NAMES[blackholes.length] });
+    }
+    if (blackholes.length < nBH) return null;
+    const L = { tee, hole, planets, blackholes };
+    L.bodies = [...planets, ...blackholes, { x: hole.x, y: hole.y, gm: 1.6e5 }];
+    return L;
+  }
+
+  // Par comes from how crowded the hole is: planets count once, black holes twice.
+  function genLevel(seed, idx) {
+    const rng = mulberry32(hash2(seed, idx));
+    let L = null;
+    for (let attempt = 0; attempt < 60 && !L; attempt++) L = layout(rng, idx);
+    const load = L.planets.length + 2 * L.blackholes.length;
+    L.par = load <= 1 ? 2 : load <= 4 ? 3 : 4;
+    return L;
+  }
+
+  return {
+    W, H, HOLES, BALL_R, HOLE_R, CAPTURE_V, MAX_V, DT, OOB, MAX_STROKES, MAX_FLIGHT,
+    step, judge, genLevel,
+  };
+})();
+</script>
+<script>
+(function () {
+  const $ = s => document.querySelector(s);
+  const stage = $('#stage'), cv = $('#cv'), ctx = cv.getContext('2d');
+  const css = getComputedStyle(document.documentElement);
+  const tok = n => css.getPropertyValue(n).trim();
+  const COL = {
+    sky: tok('--sky'), deep: tok('--sky-deep'), ink: tok('--ink'), chart: tok('--chart'), chalk: tok('--chalk'),
+    saffron: tok('--saffron'), flag: tok('--flag'), mint: tok('--mint'), ember: tok('--ember'),
+  };
+  const MONO = '"JetBrains Mono", ui-monospace, Menlo, monospace';
+  const TAU = Math.PI * 2;
+  const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const store = {
+    get(k) { try { return localStorage.getItem(k); } catch (_) { return null; } },
+    set(k, v) { try { localStorage.setItem(k, v); } catch (_) { /* storage blocked */ } },
+  };
+  const { W, H, HOLES, BALL_R, HOLE_R, MAX_V, DT, MAX_STROKES } = MP;
+  const PREVIEW_T = 0.55, AU = 500;
+
+  function rgb(hex) {
+    let h = hex.replace('#', '');
+    if (h.length === 3) h = h.split('').map(c => c + c).join('');
+    const n = parseInt(h, 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  }
+  const rgba = (hex, a) => { const [r, g, b] = rgb(hex); return `rgba(${r},${g},${b},${a})`; };
+  const mix = (h1, h2, t) => { const a = rgb(h1), b = rgb(h2); return `rgb(${a.map((v, i) => Math.round(v + (b[i] - v) * t)).join(',')})`; };
+
+  // ---------- view: world 1600x1000 fitted to the stage, turned 90° on portrait screens ----------
+  const view = { w: 1, h: 1, dpr: 1, s: 1, rot: false, cx: 0, cy: 0, up: { x: 0, y: -1 }, right: { x: 1, y: 0 } };
+  let stars = null, twinkles = [];
+
+  function resize() {
+    const r = stage.getBoundingClientRect();
+    view.dpr = Math.min(window.devicePixelRatio || 1, 2);
+    view.w = Math.max(1, r.width); view.h = Math.max(1, r.height);
+    cv.width = Math.round(view.w * view.dpr); cv.height = Math.round(view.h * view.dpr);
+    view.rot = view.h > view.w * 1.05;
+    const vw = view.rot ? view.h : view.w, vh = view.rot ? view.w : view.h;
+    view.s = Math.max(0.05, Math.min((vw - 28) / W, (vh - 28) / H));
+    view.cx = view.w / 2; view.cy = view.h / 2;
+    view.up = view.rot ? { x: 1, y: 0 } : { x: 0, y: -1 };
+    view.right = view.rot ? { x: 0, y: 1 } : { x: 1, y: 0 };
+    buildStars();
+  }
+  function worldTransform() {
+    const { s, cx, cy, dpr } = view;
+    if (view.rot) ctx.setTransform(0, -s * dpr, s * dpr, 0, (cx - (H / 2) * s) * dpr, (cy + (W / 2) * s) * dpr);
+    else ctx.setTransform(s * dpr, 0, 0, s * dpr, (cx - (W / 2) * s) * dpr, (cy - (H / 2) * s) * dpr);
+  }
+  const toScreen = (x, y) => view.rot
+    ? { x: view.cx + (y - H / 2) * view.s, y: view.cy - (x - W / 2) * view.s }
+    : { x: view.cx + (x - W / 2) * view.s, y: view.cy + (y - H / 2) * view.s };
+  const screenDirToWorld = (dx, dy) => view.rot ? { x: -dy, y: dx } : { x: dx, y: dy };
+
+  function buildStars() {
+    stars = document.createElement('canvas');
+    stars.width = cv.width; stars.height = cv.height;
+    const c = stars.getContext('2d');
+    c.scale(view.dpr, view.dpr);
+    for (let i = 0; i < 3; i++) {
+      const x = Math.random() * view.w, y = Math.random() * view.h;
+      const r = Math.max(view.w, view.h) * (0.25 + Math.random() * 0.3);
+      const g = c.createRadialGradient(x, y, 0, x, y, r);
+      g.addColorStop(0, rgba(i === 1 ? COL.flag : COL.chart, 0.07));
+      g.addColorStop(1, rgba(COL.chart, 0));
+      c.fillStyle = g; c.fillRect(0, 0, view.w, view.h);
+    }
+    const n = Math.round((view.w * view.h) / 1700);
+    for (let i = 0; i < n; i++) {
+      c.fillStyle = rgba(Math.random() < 0.1 ? COL.saffron : COL.chalk, 0.12 + Math.random() * 0.55);
+      const sz = Math.random() < 0.92 ? 1 : 1.7;
+      c.fillRect(Math.random() * view.w, Math.random() * view.h, sz, sz);
+    }
+    twinkles = Array.from({ length: 18 }, () => ({
+      x: Math.random() * view.w, y: Math.random() * view.h,
+      ph: Math.random() * TAU, sp: 0.6 + Math.random() * 1.4, s: 1.5 + Math.random() * 2,
+    }));
+  }
+
+  // ---------- state ----------
+  const G = {
+    seed: 0, idx: 0, scores: [], levels: [], strokes: 0, state: 'aim',
+    ball: { x: 0, y: 0, vx: 0, vy: 0, contact: false }, lastRest: { x: 0, y: 0 },
+    t: 0, acc: 0, js: null, aimA: 0, aimP: 0, drag: null,
+    trail: [], parts: [], timer: 0, timerMax: 1, after: null, fx: null,
+    clock: 0, lastBounce: 0, muted: store.get('moonputt-muted') === '1', shotsTaken: 0,
+  };
+  const level = i => G.levels[i] || (G.levels[i] = MP.genLevel(G.seed, i));
+
+  // ---------- sound ----------
+  let AC = null;
+  function unlockAudio() {
+    if (G.muted) return;
+    try {
+      if (!AC) AC = new (window.AudioContext || window.webkitAudioContext)();
+      if (AC.state === 'suspended') AC.resume();
+    } catch (_) { AC = null; }
+  }
+  function tone(f, o = {}) {
+    if (G.muted || !AC) return;
+    const t0 = AC.currentTime + (o.delay || 0), dur = o.dur || 0.15;
+    const osc = AC.createOscillator(), g = AC.createGain();
+    osc.type = o.type || 'sine';
+    osc.frequency.setValueAtTime(f, t0);
+    if (o.to) osc.frequency.exponentialRampToValueAtTime(o.to, t0 + dur);
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(o.vol || 0.15, t0 + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    osc.connect(g); g.connect(AC.destination);
+    osc.start(t0); osc.stop(t0 + dur + 0.05);
+  }
+  const sfx = {
+    shot: p => tone(260 + 380 * p, { to: 110, type: 'triangle', dur: 0.2, vol: 0.22 }),
+    bounce: v => tone(150 + Math.min(v, 900) * 0.25, { to: 70, dur: 0.1, vol: Math.min(0.22, 0.04 + v / 3000) }),
+    sink: ace => (ace ? [523.25, 659.25, 783.99, 1046.5, 1318.5, 1568] : [523.25, 659.25, 783.99, 1046.5])
+      .forEach((f, i) => tone(f, { type: 'triangle', dur: 0.32, vol: 0.14, delay: i * 0.085 })),
+    penalty: () => tone(330, { to: 82, type: 'sawtooth', dur: 0.5, vol: 0.06 }),
+    lip: () => { tone(880, { type: 'square', dur: 0.05, vol: 0.04 }); tone(620, { type: 'square', dur: 0.07, vol: 0.04, delay: 0.07 }); },
+    blip: () => tone(660, { type: 'triangle', dur: 0.08, vol: 0.1 }),
+  };
+
+  // ---------- HUD ----------
+  const el = {
+    hole: $('#sHole'), par: $('#sPar'), strokes: $('#sStrokes'), total: $('#sTotal'), pin: $('#sPin'),
+    course: $('#courseLabel'), sound: $('#btnSound'), fresh: $('#btnNew'),
+    toast: $('#toast'), hint: $('#hint'), card: $('#card'),
+  };
+  const fmtRel = n => (n === 0 ? 'E' : n > 0 ? `+${n}` : `−${-n}`);
+  const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+  function relSoFar() {
+    let r = 0;
+    G.scores.forEach((s, i) => { if (s != null) r += s - level(i).par; });
+    return r;
+  }
+  function roundWords(r) {
+    return r === 0 ? 'level par for the round' : r < 0 ? `${-r} under par for the round` : `${r} over par for the round`;
+  }
+  let lastPin = '';
+  function pinText() {
+    const L = level(G.idx);
+    const t = (Math.hypot(G.ball.x - L.hole.x, G.ball.y - L.hole.y) / AU).toFixed(2) + ' AU';
+    if (t !== lastPin) { el.pin.textContent = t; lastPin = t; }
+  }
+  function hud() {
+    const L = level(G.idx);
+    el.hole.innerHTML = `${G.idx + 1}<small>/${HOLES}</small>`;
+    el.par.textContent = L.par;
+    el.strokes.textContent = G.strokes;
+    el.total.textContent = fmtRel(relSoFar());
+    pinText();
+  }
+  let toastTimer = 0;
+  function toast(msg, kind = '') {
+    el.toast.textContent = msg;
+    el.toast.className = 'toast ' + kind;
+    el.toast.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { el.toast.hidden = true; }, 2300);
+  }
+
+  // ---------- course flow ----------
+  function newCourse(seed, keep) {
+    G.seed = seed || 1000 + Math.floor(Math.random() * 9000);
+    G.levels = [];
+    for (let i = 0; i < HOLES; i++) level(i);
+    G.scores = keep && Array.isArray(keep.scores) ? keep.scores.slice(0, HOLES) : [];
+    el.course.textContent = `Course ${G.seed}`;
+    disarm();
+    startHole(keep && keep.idx > 0 && keep.idx < HOLES ? keep.idx : 0);
+  }
+  function startHole(i) {
+    G.idx = i;
+    const L = level(i);
+    G.strokes = 0;
+    G.ball = { x: L.tee.x, y: L.tee.y, vx: 0, vy: 0, contact: false };
+    G.lastRest = { x: L.tee.x, y: L.tee.y };
+    G.aimA = Math.atan2(L.hole.y - L.tee.y, L.hole.x - L.tee.x);
+    G.aimP = 0; G.drag = null; G.trail = []; G.parts = []; G.fx = null;
+    G.state = 'aim';
+    closeCard(); hud();
+    if (document.activeElement === document.body || el.card.contains(document.activeElement)) cv.focus({ preventScroll: true });
+  }
+  function shoot() {
+    if (G.state !== 'aim' || G.aimP < 0.03) return;
+    const p = G.aimP;
+    G.ball.vx = Math.cos(G.aimA) * p * MAX_V;
+    G.ball.vy = Math.sin(G.aimA) * p * MAX_V;
+    G.strokes++;
+    G.state = 'flying'; G.t = 0; G.acc = 0;
+    G.js = { rest: 0, lip: false, lipSaid: false };
+    G.trail = [{ x: G.ball.x, y: G.ball.y }];
+    G.aimP = 0; G.drag = null;
+    sfx.shot(p);
+    burst(G.ball.x, G.ball.y, 10, [COL.chalk, COL.saffron], 160, 0.4);
+    if (!G.shotsTaken++) el.hint.classList.add('gone');
+    hud();
+  }
+  function settle(r) {
+    const L = level(G.idx), b = G.ball;
+    if (r === 'sunk') {
+      G.state = 'sunk'; G.timer = G.timerMax = 1.25;
+      G.fx = { kind: 'sink', x: b.x, y: b.y };
+      burst(L.hole.x, L.hole.y, reduceMotion ? 24 : 80, [COL.saffron, COL.mint, COL.flag, COL.chalk], 560, 1.5, 280);
+      sfx.sink(G.strokes === 1);
+      if (G.strokes === 1) toast('Hole in one!', 'good');
+      G.after = () => finishHole(false);
+      return;
+    }
+    if (r === 'rest') {
+      b.vx = 0; b.vy = 0;
+      G.lastRest = { x: b.x, y: b.y };
+      if (G.strokes >= MAX_STROKES) { finishHole(true); return; }
+      G.state = 'aim'; hud();
+      return;
+    }
+    const msgs = {
+      lost: 'Lost in space. Stroke and distance, +1.',
+      orbit: 'Stuck in orbit. +1 stroke.',
+      swallowed: `${(G.js.bh && G.js.bh.name) || 'A black hole'} ate your ball. +1 stroke.`,
+    };
+    G.strokes++;
+    G.state = 'penalty'; G.timer = G.timerMax = 1.1;
+    G.fx = { kind: r, x: b.x, y: b.y, bh: G.js.bh };
+    toast(msgs[r], 'bad'); sfx.penalty(); hud();
+    if (r === 'swallowed') burst(b.x, b.y, 18, [COL.ember, COL.saffron], 220, 0.7);
+    G.after = () => {
+      if (G.strokes >= MAX_STROKES) { finishHole(true); return; }
+      Object.assign(G.ball, { x: G.lastRest.x, y: G.lastRest.y, vx: 0, vy: 0, contact: false });
+      G.fx = null; G.trail = []; G.state = 'aim'; hud();
+      burst(G.ball.x, G.ball.y, 12, [COL.chalk, COL.saffron], 120, 0.5);
+    };
+  }
+  function finishHole(picked) {
+    G.state = 'card';
+    G.scores[G.idx] = Math.min(G.strokes, MAX_STROKES);
+    hud();
+    if (G.idx === HOLES - 1) finalCard(); else holeCard(picked);
+  }
+
+  // ---------- cards ----------
+  function scoreName(s, par) {
+    if (s === 1) return { t: 'Hole in one!', c: 'ace' };
+    const d = s - par;
+    const names = { '-3': 'Albatross', '-2': 'Eagle', '-1': 'Birdie', 0: 'Par', 1: 'Bogey', 2: 'Double bogey', 3: 'Triple bogey' };
+    return { t: names[d] || (d < 0 ? `${-d} under par` : `${d} over par`), c: d < 0 ? 'good' : d > 0 ? 'bad' : '' };
+  }
+  function scorecard() {
+    let head = '<tr><th scope="row">Hole</th>', par = '<tr><th scope="row">Par</th>', you = '<tr><th scope="row">You</th>';
+    let pt = 0, yt = 0, played = 0;
+    for (let i = 0; i < HOLES; i++) {
+      const p = level(i).par, s = G.scores[i], cur = i === G.idx ? ' class="now"' : '';
+      pt += p;
+      head += `<td${cur}>${i + 1}</td>`;
+      par += `<td${cur}>${p}</td>`;
+      if (s != null) {
+        yt += s; played++;
+        const d = s - p;
+        const mk = d <= -2 ? 'eagle' : d === -1 ? 'birdie' : d === 1 ? 'bogey' : d >= 2 ? 'dbl' : '';
+        you += `<td${cur}><span class="mk ${mk}">${s}</span></td>`;
+      } else you += `<td${cur}><span class="mk">·</span></td>`;
+    }
+    head += '<th scope="col">Out</th></tr>';
+    par += `<td><b>${pt}</b></td></tr>`;
+    you += `<td><b>${played ? yt : '·'}</b></td></tr>`;
+    return `<div class="sc-wrap"><table class="sc"><thead>${head}</thead><tbody>${par}${you}</tbody></table></div>
+      <p class="legend">Circle: one under par. Square: one over. Double ring or square: two or more.</p>`;
+  }
+  function openCard(html) {
+    el.card.innerHTML = `<div class="card-inner" role="dialog" aria-modal="true" aria-labelledby="cardTitle">${html}</div>`;
+    el.card.hidden = false;
+    const b = el.card.querySelector('button.primary');
+    if (b) b.focus({ preventScroll: true });
+  }
+  function closeCard() { el.card.hidden = true; el.card.innerHTML = ''; }
+  function holeCard(picked) {
+    const L = level(G.idx), s = G.scores[G.idx];
+    const n = picked ? { t: 'Picked up', c: 'bad' } : scoreName(s, L.par);
+    const line = picked
+      ? `Ten strokes is the most a hole can cost, so this one goes down as a 10. You're ${roundWords(relSoFar())}.`
+      : `${plural(s, 'stroke')} on a par ${L.par}. You're ${roundWords(relSoFar())}.`;
+    openCard(`
+      <p class="eyebrow">Hole ${G.idx + 1} · Par ${L.par}</p>
+      <h2 id="cardTitle" class="${n.c}">${n.t}</h2>
+      <p>${line}</p>
+      ${scorecard()}
+      <div class="row"><button type="button" class="primary" id="btnNext">Tee off on hole ${G.idx + 2}</button></div>`);
+    $('#btnNext').onclick = () => startHole(G.idx + 1);
+  }
+  function finalCard() {
+    const total = G.scores.reduce((a, b) => a + (b || 0), 0), rel = relSoFar();
+    const best = parseInt(store.get('moonputt-best'), 10);
+    const isBest = isNaN(best) || rel < best;
+    if (isBest) store.set('moonputt-best', String(rel));
+    const bestLine = isBest ? 'That is your best round on this device.' : `Your best round on this device is ${fmtRel(best)}.`;
+    const finish = rel === 0 ? 'level par' : rel < 0 ? `${-rel} under par` : `${rel} over par`;
+    openCard(`
+      <p class="eyebrow">Course ${G.seed} · Final card</p>
+      <h2 id="cardTitle" class="${rel < 0 ? 'good' : rel > 0 ? 'bad' : ''}">${total} strokes, ${fmtRel(rel)}</h2>
+      <p>You finished ${finish}. ${bestLine}</p>
+      ${scorecard()}
+      <div class="row">
+        <button type="button" class="primary" id="btnAgain">Play a new course</button>
+        <button type="button" id="btnReplay">Replay course ${G.seed}</button>
+      </div>`);
+    $('#btnAgain').onclick = () => newCourse();
+    $('#btnReplay').onclick = () => newCourse(G.seed);
+  }
+
+  // ---------- effects ----------
+  function burst(x, y, n, colors, speed, life, grav = 0) {
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * TAU, v = speed * (0.3 + Math.random() * 0.7);
+      G.parts.push({
+        x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v,
+        life: life * (0.6 + Math.random() * 0.4), max: life, c: colors[i % colors.length],
+        size: 3 + Math.random() * 4, rot: Math.random() * TAU, spin: (Math.random() - 0.5) * 10, g: grav,
+      });
+    }
+  }
+  function bounce(imp) {
+    if (G.clock - G.lastBounce < 0.05) return;
+    G.lastBounce = G.clock;
+    sfx.bounce(imp);
+    burst(G.ball.x, G.ball.y, Math.min(10, 2 + ((imp / 120) | 0)), [COL.chalk, COL.chart], imp * 0.25, 0.45);
+  }
+
+  // ---------- loop ----------
+  function update(dt) {
+    G.clock += dt;
+    if (G.state === 'flying') {
+      const L = level(G.idx);
+      G.acc += dt;
+      while (G.acc >= DT && G.state === 'flying') {
+        G.acc -= DT;
+        const imp = MP.step(G.ball, L, DT);
+        if (imp > 110) bounce(imp);
+        G.t += DT;
+        const r = MP.judge(G.ball, L, G.t, G.js, DT);
+        if (G.js.lip && !G.js.lipSaid) { G.js.lipSaid = true; toast('Lipped out. Too much pace.', 'bad'); sfx.lip(); }
+        if (r) settle(r);
+      }
+      G.trail.push({ x: G.ball.x, y: G.ball.y });
+      if (G.trail.length > 70) G.trail.shift();
+      pinText();
+    } else {
+      if (G.trail.length) G.trail.shift();
+      if (G.state === 'sunk' || G.state === 'penalty') {
+        G.timer -= dt;
+        if (G.timer <= 0 && G.after) { const f = G.after; G.after = null; f(); }
+      }
+    }
+    for (const p of G.parts) {
+      p.vx *= 1 - 1.6 * dt; p.vy *= 1 - 1.6 * dt;
+      p.vx -= view.up.x * p.g * dt; p.vy -= view.up.y * p.g * dt;
+      p.x += p.vx * dt; p.y += p.vy * dt;
+      p.life -= dt;
+    }
+    G.parts = G.parts.filter(p => p.life > 0);
+  }
+
+  // ---------- drawing ----------
+  function label(text, x, y, o = {}) {
+    ctx.save();
+    ctx.translate(x, y);
+    if (view.rot) ctx.rotate(Math.PI / 2);
+    const k = 1 / view.s;
+    ctx.scale(k, k);
+    ctx.font = `${o.weight || 500} ${o.size || 10}px ${MONO}`;
+    if ('letterSpacing' in ctx) ctx.letterSpacing = (o.ls == null ? 1.2 : o.ls) + 'px';
+    ctx.fillStyle = o.color || rgba(COL.chart, 0.75);
+    ctx.textAlign = o.align || 'center';
+    ctx.textBaseline = o.base || 'middle';
+    ctx.fillText(text, 0, 0);
+    ctx.restore();
+  }
+  // Point offset from p by `px` screen pixels toward screen-down.
+  const below = (p, px) => ({ x: p.x - view.up.x * (px / view.s), y: p.y - view.up.y * (px / view.s) });
+
+  function drawChart() {
+    const px = 1 / view.s;
+    ctx.lineWidth = px;
+    ctx.strokeStyle = rgba(COL.chart, 0.07);
+    ctx.beginPath();
+    for (let x = 100; x < W; x += 100) { ctx.moveTo(x, 0); ctx.lineTo(x, H); }
+    for (let y = 100; y < H; y += 100) { ctx.moveTo(0, y); ctx.lineTo(W, y); }
+    ctx.stroke();
+    ctx.strokeStyle = rgba(COL.chart, 0.4);
+    ctx.strokeRect(0, 0, W, H);
+    ctx.beginPath();
+    for (let x = 0; x <= W; x += 50) {
+      const l = (x % 200 === 0 ? 10 : 5) * px;
+      ctx.moveTo(x, 0); ctx.lineTo(x, l); ctx.moveTo(x, H); ctx.lineTo(x, H - l);
+    }
+    for (let y = 0; y <= H; y += 50) {
+      const l = (y % 200 === 0 ? 10 : 5) * px;
+      ctx.moveTo(0, y); ctx.lineTo(l, y); ctx.moveTo(W, y); ctx.lineTo(W - l, y);
+    }
+    ctx.stroke();
+    const lc = rgba(COL.chart, 0.5);
+    for (let x = 200; x < W; x += 200) label(`${x / 100}h`, x, H - 20 * px, { size: 9, color: lc });
+    for (let y = 100; y < H; y += 200) {
+      const dec = 50 - y / 10;
+      label(`${dec > 0 ? '+' : dec < 0 ? '−' : ''}${Math.abs(dec)}°`, 28 * px, y, { size: 9, color: lc });
+    }
+  }
+  // Isogravs: rings where the pull drops to 420, 180 and 80 units/s².
+  function drawField(b, color) {
+    ctx.save();
+    ctx.lineWidth = 1 / view.s;
+    ctx.setLineDash([3 / view.s, 7 / view.s]);
+    if (!reduceMotion) ctx.lineDashOffset = (G.clock * 6) / view.s;
+    [420, 180, 80].forEach((a, i) => {
+      const d = Math.sqrt(b.gm / a);
+      if (d < (b.r || 0) + 12) return;
+      ctx.strokeStyle = rgba(color, 0.24 - i * 0.065);
+      ctx.beginPath(); ctx.arc(b.x, b.y, d, 0, TAU); ctx.stroke();
+    });
+    ctx.restore();
+  }
+  function drawPlanet(p) {
+    const s = view.s, lx = (view.up.x - view.right.x) * 0.4 * p.r, ly = (view.up.y - view.right.y) * 0.4 * p.r;
+    const g = ctx.createRadialGradient(p.x + lx, p.y + ly, p.r * 0.05, p.x, p.y, p.r * 1.05);
+    g.addColorStop(0, mix(p.color, '#ffffff', 0.35));
+    g.addColorStop(0.55, p.color);
+    g.addColorStop(1, mix(p.color, COL.deep, 0.6));
+    ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, TAU);
+    ctx.fillStyle = g; ctx.fill();
+    ctx.save();
+    ctx.clip();
+    if (p.style === 'bands') {
+      ctx.translate(p.x, p.y); ctx.rotate(p.tilt);
+      for (const b of p.bands) { ctx.fillStyle = rgba(COL.deep, b.a); ctx.fillRect(-p.r, b.off * p.r, p.r * 2, b.w * p.r); }
+    } else if (p.style === 'craters') {
+      for (const c of p.craters) {
+        ctx.beginPath(); ctx.arc(p.x + c.dx * p.r, p.y + c.dy * p.r, c.r * p.r, 0, TAU);
+        ctx.fillStyle = rgba(COL.deep, 0.17); ctx.fill();
+        ctx.lineWidth = 1.2 / s; ctx.strokeStyle = rgba('#ffffff', 0.12); ctx.stroke();
+      }
+    }
+    ctx.restore();
+    ctx.lineWidth = 1.5 / s;
+    ctx.strokeStyle = rgba(COL.chalk, 0.2);
+    ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, TAU); ctx.stroke();
+    const at = below(p, p.r * s + 14);
+    label(p.name.toUpperCase(), at.x, at.y, { size: 10, color: rgba(COL.chalk, 0.7) });
+    const at2 = below(p, p.r * s + 28);
+    label(`${(p.g / 1000).toFixed(1)} g`, at2.x, at2.y, { size: 9, color: rgba(COL.chart, 0.8) });
+  }
+  function drawBlackHole(k) {
+    const s = view.s, r = k.r;
+    const g = ctx.createRadialGradient(k.x, k.y, r * 0.8, k.x, k.y, r * 3.6);
+    g.addColorStop(0, rgba(COL.ember, 0.55));
+    g.addColorStop(0.35, rgba(COL.flag, 0.16));
+    g.addColorStop(1, rgba(COL.flag, 0));
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(k.x, k.y, r * 3.6, 0, TAU); ctx.fill();
+    const rot = reduceMotion ? 0 : G.clock * 2.4;
+    ctx.lineCap = 'round';
+    for (let i = 0; i < 4; i++) {
+      ctx.lineWidth = (2.2 - i * 0.3) / s;
+      ctx.strokeStyle = rgba(i % 2 ? COL.saffron : COL.ember, 0.6 - i * 0.12);
+      const a = rot * (1.6 - i * 0.25) + i * 1.7;
+      ctx.beginPath(); ctx.arc(k.x, k.y, r * (1.5 + i * 0.45), a, a + 1.9); ctx.stroke();
+    }
+    ctx.fillStyle = '#000000';
+    ctx.beginPath(); ctx.arc(k.x, k.y, r, 0, TAU); ctx.fill();
+    ctx.lineWidth = 1.5 / s; ctx.strokeStyle = rgba(COL.saffron, 0.85);
+    ctx.beginPath(); ctx.arc(k.x, k.y, r * 1.1, 0, TAU); ctx.stroke();
+    const at = below(k, r * 3.6 * s + 6);
+    label(k.name.toUpperCase(), at.x, at.y, { size: 10, color: rgba(COL.ember, 0.9) });
+    const at2 = below(k, r * 3.6 * s + 20);
+    label('black hole', at2.x, at2.y, { size: 9, color: rgba(COL.chart, 0.8) });
+  }
+  function drawTee(L) {
+    const { x, y } = L.tee, s = view.s;
+    ctx.save();
+    ctx.setLineDash([3 / s, 4 / s]);
+    ctx.strokeStyle = rgba(COL.chart, 0.6); ctx.lineWidth = 1.5 / s;
+    ctx.beginPath(); ctx.arc(x, y, BALL_R + 9, 0, TAU); ctx.stroke();
+    ctx.restore();
+    const at = below(L.tee, (BALL_R + 9) * s + 13);
+    label('TEE', at.x, at.y, { size: 9, color: rgba(COL.chart, 0.85) });
+  }
+  function drawHole(L) {
+    const { x, y } = L.hole, s = view.s, R = HOLE_R;
+    const pulse = reduceMotion ? 0.6 : 0.5 + 0.5 * Math.sin(G.clock * 2.6);
+    const big = G.state === 'sunk' ? 1.9 : 1;
+    const gr = R * (3 + pulse) * big;
+    const glow = ctx.createRadialGradient(x, y, R * 0.6, x, y, gr);
+    glow.addColorStop(0, rgba(COL.mint, 0.38)); glow.addColorStop(1, rgba(COL.mint, 0));
+    ctx.fillStyle = glow;
+    ctx.beginPath(); ctx.arc(x, y, gr, 0, TAU); ctx.fill();
+    ctx.fillStyle = COL.deep;
+    ctx.beginPath(); ctx.arc(x, y, R, 0, TAU); ctx.fill();
+    const rot = reduceMotion ? 0 : G.clock * 2;
+    ctx.lineWidth = 1.5 / s; ctx.lineCap = 'round';
+    for (let i = 0; i < 3; i++) {
+      ctx.strokeStyle = rgba(COL.mint, 0.6 - i * 0.14);
+      const a = rot * (1 + i * 0.4) + i * 2;
+      ctx.beginPath(); ctx.arc(x, y, R * (0.3 + i * 0.22), a, a + 2.3); ctx.stroke();
+    }
+    ctx.strokeStyle = COL.chalk; ctx.lineWidth = 2 / s;
+    ctx.beginPath(); ctx.arc(x, y, R, 0, TAU); ctx.stroke();
+    // flagstick and flag, sized in screen pixels so it reads at any zoom
+    const up = view.up, rt = view.right, k = 1 / s;
+    const top = { x: x + up.x * 58 * k, y: y + up.y * 58 * k };
+    ctx.strokeStyle = rgba(COL.chalk, 0.9); ctx.lineWidth = 2 * k;
+    ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(top.x, top.y); ctx.stroke();
+    const fw = 34 * k, fh = 22 * k, wave = (reduceMotion ? 0 : Math.sin(G.clock * 4) * 3) * k;
+    ctx.fillStyle = COL.flag;
+    ctx.beginPath();
+    ctx.moveTo(top.x, top.y);
+    ctx.lineTo(top.x + rt.x * fw - up.x * (fh / 2 + wave), top.y + rt.y * fw - up.y * (fh / 2 + wave));
+    ctx.lineTo(top.x - up.x * fh, top.y - up.y * fh);
+    ctx.closePath(); ctx.fill();
+    label(String(G.idx + 1), top.x + rt.x * 11 * k - up.x * 11 * k, top.y + rt.y * 11 * k - up.y * 11 * k,
+      { size: 11, weight: 600, color: COL.deep, ls: 0 });
+  }
+  function drawTrail() {
+    const t = G.trail;
+    if (t.length < 2) return;
+    ctx.lineCap = 'round';
+    for (let i = 1; i < t.length; i++) {
+      const f = i / t.length;
+      ctx.strokeStyle = rgba(COL.saffron, 0.5 * f);
+      ctx.lineWidth = BALL_R * 1.3 * f;
+      ctx.beginPath(); ctx.moveTo(t[i - 1].x, t[i - 1].y); ctx.lineTo(t[i].x, t[i].y); ctx.stroke();
+    }
+  }
+  function drawAim(L) {
+    if (G.state !== 'aim' || G.aimP <= 0) return;
+    const b = G.ball, p = G.aimP, s = view.s;
+    const sim = { x: b.x, y: b.y, vx: Math.cos(G.aimA) * p * MAX_V, vy: Math.sin(G.aimA) * p * MAX_V, contact: false };
+    const n = Math.round(PREVIEW_T / DT), pts = [];
+    for (let i = 1; i <= n; i++) {
+      MP.step(sim, L, DT);
+      const inBH = L.blackholes.some(k => Math.hypot(sim.x - k.x, sim.y - k.y) < k.r);
+      if (sim.contact || inBH) { pts.push({ x: sim.x, y: sim.y, hit: true }); break; }
+      if (i % 7 === 0) pts.push({ x: sim.x, y: sim.y });
+    }
+    pts.forEach((q, i) => {
+      const f = 1 - i / (pts.length + 2);
+      ctx.fillStyle = rgba(q.hit ? COL.flag : COL.saffron, 0.9 * f);
+      ctx.beginPath(); ctx.arc(q.x, q.y, ((q.hit ? 4.5 : 3) * f + 0.6) / s, 0, TAU); ctx.fill();
+    });
+    const pull = (16 + p * 70) / s;
+    const back = { x: b.x - Math.cos(G.aimA) * pull, y: b.y - Math.sin(G.aimA) * pull };
+    ctx.save();
+    ctx.strokeStyle = rgba(COL.chalk, 0.45); ctx.lineWidth = 2 / s; ctx.setLineDash([2 / s, 4 / s]);
+    ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.lineTo(back.x, back.y); ctx.stroke();
+    ctx.restore();
+    ctx.fillStyle = rgba(COL.chalk, 0.85);
+    ctx.beginPath(); ctx.arc(back.x, back.y, 4 / s, 0, TAU); ctx.fill();
+    const a0 = Math.atan2(view.up.y, view.up.x);
+    const col = p < 0.5 ? COL.mint : p < 0.85 ? COL.saffron : COL.flag;
+    ctx.lineWidth = 3 / s; ctx.lineCap = 'round';
+    ctx.strokeStyle = rgba(COL.chart, 0.25);
+    ctx.beginPath(); ctx.arc(b.x, b.y, 22 / s, 0, TAU); ctx.stroke();
+    ctx.strokeStyle = col;
+    ctx.beginPath(); ctx.arc(b.x, b.y, 22 / s, a0, a0 + p * TAU); ctx.stroke();
+    const at = below(b, 40);
+    label(`${Math.round(p * 100)}%`, at.x, at.y, { size: 11, weight: 600, color: col, ls: 0.5 });
+  }
+  function drawBall(L) {
+    let x = G.ball.x, y = G.ball.y, r = BALL_R, a = 1;
+    const fx = G.fx;
+    if (fx) {
+      const t = 1 - Math.max(0, G.timer / G.timerMax);
+      if (fx.kind === 'sink') {
+        const e = Math.min(1, t * 3);
+        x = fx.x + (L.hole.x - fx.x) * e; y = fx.y + (L.hole.y - fx.y) * e;
+        r *= Math.max(0, 1 - t * 1.4);
+      } else if (fx.kind === 'swallowed' && fx.bh) {
+        const d0 = Math.hypot(fx.x - fx.bh.x, fx.y - fx.bh.y), a0 = Math.atan2(fx.y - fx.bh.y, fx.x - fx.bh.x);
+        const e = Math.min(1, t * 1.6), d = d0 * (1 - e), ang = a0 + e * 9;
+        x = fx.bh.x + Math.cos(ang) * d; y = fx.bh.y + Math.sin(ang) * d;
+        r *= 1 - e;
+      } else a = Math.max(0, 1 - t * 1.5);
+    }
+    if (r <= 0.3 || a <= 0) return;
+    ctx.save();
+    ctx.globalAlpha = a;
+    const glow = ctx.createRadialGradient(x, y, r * 0.5, x, y, r * 3.2);
+    glow.addColorStop(0, rgba(COL.saffron, 0.42)); glow.addColorStop(1, rgba(COL.saffron, 0));
+    ctx.fillStyle = glow;
+    ctx.beginPath(); ctx.arc(x, y, r * 3.2, 0, TAU); ctx.fill();
+    const hx = x + (view.up.x - view.right.x) * r * 0.35, hy = y + (view.up.y - view.right.y) * r * 0.35;
+    const g = ctx.createRadialGradient(hx, hy, r * 0.1, x, y, r);
+    g.addColorStop(0, '#fff8df'); g.addColorStop(0.5, COL.saffron); g.addColorStop(1, mix(COL.saffron, COL.flag, 0.45));
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill();
+    ctx.restore();
+  }
+  function drawParts() {
+    for (const p of G.parts) {
+      const sz = p.size / view.s;
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, p.life / p.max);
+      ctx.fillStyle = p.c;
+      ctx.translate(p.x, p.y); ctx.rotate(p.rot + G.clock * p.spin);
+      ctx.fillRect(-sz / 2, -sz / 4, sz, sz / 2);
+      ctx.restore();
+    }
+  }
+  function drawTwinkles() {
+    ctx.lineWidth = 1;
+    for (const t of twinkles) {
+      const a = reduceMotion ? 0.5 : 0.35 + 0.35 * Math.sin(G.clock * t.sp + t.ph);
+      ctx.strokeStyle = rgba(COL.chalk, a);
+      ctx.beginPath();
+      ctx.moveTo(t.x - t.s, t.y); ctx.lineTo(t.x + t.s, t.y);
+      ctx.moveTo(t.x, t.y - t.s); ctx.lineTo(t.x, t.y + t.s);
+      ctx.stroke();
+    }
+  }
+  function drawDrag() {
+    const d = G.drag;
+    if (!d || !d.to || G.aimP <= 0) return;
+    ctx.save();
+    ctx.strokeStyle = rgba(COL.chalk, 0.3); ctx.lineWidth = 1.5; ctx.setLineDash([4, 5]);
+    ctx.beginPath(); ctx.moveTo(d.from.x, d.from.y); ctx.lineTo(d.to.x, d.to.y); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.strokeStyle = rgba(COL.chalk, 0.55);
+    ctx.beginPath(); ctx.arc(d.from.x, d.from.y, 6, 0, TAU); ctx.stroke();
+    ctx.fillStyle = rgba(COL.chalk, 0.55);
+    ctx.beginPath(); ctx.arc(d.to.x, d.to.y, 4, 0, TAU); ctx.fill();
+    ctx.restore();
+  }
+  function drawOffscreen() {
+    if (G.state !== 'flying') return;
+    const q = toScreen(G.ball.x, G.ball.y), m = 14;
+    if (q.x >= 0 && q.x <= view.w && q.y >= 0 && q.y <= view.h) return;
+    const x = Math.max(m, Math.min(view.w - m, q.x)), y = Math.max(m, Math.min(view.h - m, q.y));
+    ctx.save();
+    ctx.translate(x, y); ctx.rotate(Math.atan2(q.y - y, q.x - x));
+    ctx.fillStyle = COL.saffron;
+    ctx.beginPath(); ctx.moveTo(9, 0); ctx.lineTo(-6, -7); ctx.lineTo(-6, 7); ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+  function draw() {
+    const { dpr, w, h } = view;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = COL.sky; ctx.fillRect(0, 0, w, h);
+    if (stars) ctx.drawImage(stars, 0, 0, w, h);
+    drawTwinkles();
+    const L = G.levels[G.idx];
+    if (!L) return;
+    worldTransform();
+    drawChart();
+    for (const k of L.blackholes) drawField(k, COL.ember);
+    for (const p of L.planets) drawField(p, COL.chart);
+    for (const k of L.blackholes) drawBlackHole(k);
+    for (const p of L.planets) drawPlanet(p);
+    drawTee(L);
+    drawHole(L);
+    drawTrail();
+    drawAim(L);
+    drawBall(L);
+    drawParts();
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    drawDrag();
+    drawOffscreen();
+  }
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min(0.05, Math.max(0, (now - last) / 1000));
+    last = now;
+    update(dt);
+    draw();
+    requestAnimationFrame(frame);
+  }
+
+  // ---------- input ----------
+  const maxDrag = () => Math.max(100, Math.min(210, Math.min(view.w, view.h) * 0.34));
+  function local(e) { const r = cv.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
+  cv.addEventListener('pointerdown', e => {
+    unlockAudio();
+    if (G.state !== 'aim') return;
+    e.preventDefault();
+    try { cv.setPointerCapture(e.pointerId); } catch (_) { /* capture unsupported */ }
+    G.drag = { id: e.pointerId, from: local(e), to: null };
+    G.aimP = 0;
+  });
+  cv.addEventListener('pointermove', e => {
+    if (!G.drag || e.pointerId !== G.drag.id) return;
+    const p = local(e), dx = G.drag.from.x - p.x, dy = G.drag.from.y - p.y, len = Math.hypot(dx, dy);
+    G.drag.to = p;
+    if (len > 3) { const w = screenDirToWorld(dx, dy); G.aimA = Math.atan2(w.y, w.x); }
+    G.aimP = Math.min(1, len / maxDrag());
+  });
+  const endDrag = e => {
+    if (!G.drag || e.pointerId !== G.drag.id) return;
+    G.drag = null;
+    if (e.type === 'pointerup' && G.aimP >= 0.04) shoot(); else G.aimP = 0;
+  };
+  cv.addEventListener('pointerup', endDrag);
+  cv.addEventListener('pointercancel', endDrag);
+
+  window.addEventListener('keydown', e => {
+    if (e.target instanceof HTMLButtonElement || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (G.state !== 'aim') return;
+    const k = e.key, f = e.shiftKey ? 0.2 : 1;
+    if (k === 'ArrowLeft' || k === 'ArrowRight') {
+      G.aimA += (k === 'ArrowLeft' ? -1 : 1) * 0.04 * f;
+      if (!G.aimP) G.aimP = 0.4;
+    } else if (k === 'ArrowUp' || k === 'ArrowDown') {
+      G.aimP = Math.max(0.04, Math.min(1, (G.aimP || 0.4) + (k === 'ArrowUp' ? 1 : -1) * 0.04 * f));
+    } else if (k === ' ' || k === 'Enter') {
+      unlockAudio();
+      if (!G.aimP) G.aimP = 0.4; else shoot();
+    } else if (k === 'Escape') {
+      G.aimP = 0; G.drag = null;
+    } else return;
+    e.preventDefault();
+  });
+
+  function syncSound() {
+    el.sound.textContent = G.muted ? 'Sound off' : 'Sound on';
+    el.sound.setAttribute('aria-pressed', String(!G.muted));
+  }
+  el.sound.addEventListener('click', () => {
+    G.muted = !G.muted;
+    store.set('moonputt-muted', G.muted ? '1' : '0');
+    syncSound();
+    if (!G.muted) { unlockAudio(); sfx.blip(); }
+  });
+  let armTimer = 0;
+  function disarm() { clearTimeout(armTimer); delete el.fresh.dataset.armed; el.fresh.textContent = 'New course'; }
+  el.fresh.addEventListener('click', () => {
+    const finished = G.scores.filter(s => s != null).length === HOLES;
+    const midRound = !finished && (G.scores.some(s => s != null) || G.strokes > 0);
+    if (midRound && !el.fresh.dataset.armed) {
+      el.fresh.dataset.armed = '1';
+      el.fresh.textContent = 'Click again to restart';
+      clearTimeout(armTimer);
+      armTimer = setTimeout(disarm, 2800);
+      return;
+    }
+    newCourse();
+  });
+
+  // ---------- boot ----------
+  new ResizeObserver(resize).observe(stage);
+  resize();
+  syncSound();
+  function start(data) {
+    const d = data || {};
+    newCourse(d.seed, d.seed ? d : null);
+    requestAnimationFrame(frame);
+  }
+  const hot = window.claude && window.claude.hot;
+  if (hot && hot.snapshot) hot.snapshot(() => ({ seed: G.seed, idx: G.idx, scores: G.scores.slice() }));
+  if (hot && hot.ready) hot.ready(start); else start((hot && hot.data) || {});
+})();
+</script>
+</body>
+</html>
